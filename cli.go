@@ -21,6 +21,7 @@ type cliConfig struct {
 	disableUnsupportedFilesFilter bool
 	logLevel                      string
 	configPath                    string
+	albumName                     string
 }
 
 // Messages for bubbletea
@@ -44,6 +45,24 @@ type fileCompleteMsg struct {
 
 type uploadCompleteMsg struct{}
 
+// Album messages
+type albumProgressMsg struct {
+	albumName  string
+	itemsAdded int
+	totalItems int
+}
+
+type albumCompleteMsg struct {
+	albumName  string
+	itemsAdded int
+	albumKeys  []string
+}
+
+type albumErrorMsg struct {
+	albumName string
+	error     string
+}
+
 // Bubbletea model
 type uploadModel struct {
 	progress     progress.Model
@@ -55,6 +74,13 @@ type uploadModel struct {
 	results      []uploadResult // Track all upload results
 	width        int
 	quitting     bool
+	// Album state
+	albumName       string
+	albumItemsAdded int
+	albumTotalItems int
+	albumComplete   bool
+	albumError      string
+	albumKeys       []string
 }
 
 type uploadResult struct {
@@ -64,11 +90,19 @@ type uploadResult struct {
 	Error    string `json:"error,omitempty"`
 }
 
+type albumSummary struct {
+	Name       string   `json:"name,omitempty"`
+	ItemsAdded int      `json:"itemsAdded,omitempty"`
+	AlbumKeys  []string `json:"albumKeys,omitempty"`
+	Error      string   `json:"error,omitempty"`
+}
+
 type uploadSummary struct {
 	Total     int            `json:"total"`
 	Succeeded int            `json:"succeeded"`
 	Failed    int            `json:"failed"`
 	Results   []uploadResult `json:"results"`
+	Album     *albumSummary  `json:"album,omitempty"`
 }
 
 func initialModel() uploadModel {
@@ -124,6 +158,25 @@ func (m uploadModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quitting = true
 		return m, tea.Quit
 
+	case albumProgressMsg:
+		m.albumName = msg.albumName
+		m.albumItemsAdded = msg.itemsAdded
+		m.albumTotalItems = msg.totalItems
+		m.albumComplete = false
+		return m, nil
+
+	case albumCompleteMsg:
+		m.albumName = msg.albumName
+		m.albumItemsAdded = msg.itemsAdded
+		m.albumComplete = true
+		m.albumKeys = msg.albumKeys
+		return m, nil
+
+	case albumErrorMsg:
+		m.albumName = msg.albumName
+		m.albumError = msg.error
+		return m, nil
+
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			m.quitting = true
@@ -158,6 +211,26 @@ func (m uploadModel) View() string {
 		if status, ok := m.workers[i]; ok {
 			b.WriteString(status)
 			b.WriteString("\n")
+		}
+	}
+
+	// Album progress
+	if m.albumName != "" {
+		b.WriteString("\n")
+		albumStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+		if m.albumError != "" {
+			errorStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+			b.WriteString(errorStyle.Render("✗ Album error: "))
+			b.WriteString(m.albumError)
+			b.WriteString("\n")
+		} else if m.albumComplete {
+			b.WriteString(albumStyle.Render("✓ Added to album: "))
+			b.WriteString(m.albumName)
+			b.WriteString(fmt.Sprintf(" (%d items)\n", m.albumItemsAdded))
+		} else if m.albumTotalItems > 0 {
+			b.WriteString(albumStyle.Render("Adding to album: "))
+			b.WriteString(m.albumName)
+			b.WriteString(fmt.Sprintf(" (%d/%d items)\n", m.albumItemsAdded, m.albumTotalItems))
 		}
 	}
 
@@ -203,6 +276,15 @@ func runCLIUpload(filePaths []string, config cliConfig) error {
 	backend.AppConfig.DeleteFromHost = config.deleteFromHost
 	backend.AppConfig.DisableUnsupportedFilesFilter = config.disableUnsupportedFilesFilter
 
+	// Handle album option - check for AUTO mode
+	if strings.ToUpper(config.albumName) == "AUTO" {
+		backend.AppConfig.AlbumAutoMode = true
+		backend.AppConfig.AlbumName = ""
+	} else {
+		backend.AppConfig.AlbumAutoMode = false
+		backend.AppConfig.AlbumName = config.albumName
+	}
+
 	// Parse log level
 	logLevel := parseLogLevel(config.logLevel)
 
@@ -239,6 +321,29 @@ func runCLIUpload(filePaths []string, config cliConfig) error {
 			}
 		case "uploadStop":
 			p.Send(uploadCompleteMsg{})
+		case "albumProgress":
+			if status, ok := data.(backend.AlbumStatus); ok {
+				p.Send(albumProgressMsg{
+					albumName:  status.AlbumName,
+					itemsAdded: status.ItemsAdded,
+					totalItems: status.TotalItems,
+				})
+			}
+		case "albumComplete":
+			if status, ok := data.(backend.AlbumStatus); ok {
+				p.Send(albumCompleteMsg{
+					albumName:  status.AlbumName,
+					itemsAdded: status.ItemsAdded,
+					albumKeys:  status.AlbumKeys,
+				})
+			}
+		case "albumError":
+			if albumErr, ok := data.(backend.AlbumError); ok {
+				p.Send(albumErrorMsg{
+					albumName: albumErr.AlbumName,
+					error:     albumErr.Error,
+				})
+			}
 		}
 	}
 
@@ -263,6 +368,16 @@ func runCLIUpload(filePaths []string, config cliConfig) error {
 			Succeeded: m.completed,
 			Failed:    m.failed,
 			Results:   m.results,
+		}
+
+		// Add album info if present
+		if m.albumName != "" {
+			summary.Album = &albumSummary{
+				Name:       m.albumName,
+				ItemsAdded: m.albumItemsAdded,
+				AlbumKeys:  m.albumKeys,
+				Error:      m.albumError,
+			}
 		}
 
 		jsonOutput, err := json.MarshalIndent(summary, "", "  ")

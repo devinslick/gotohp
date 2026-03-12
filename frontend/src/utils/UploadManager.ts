@@ -28,6 +28,19 @@ export interface UploadSuccess {
   mediaKey: string;
 }
 
+export interface AlbumStatus {
+  AlbumName: string;
+  ItemsAdded: number;
+  TotalItems: number;
+  AlbumKeys: string[];
+  IsComplete: boolean;
+}
+
+export interface AlbumError {
+  AlbumName: string;
+  Error: string;
+}
+
 export interface UploadState {
   isUploading: boolean;
   totalFiles: number;
@@ -44,6 +57,9 @@ export interface UploadState {
   startTime: number;
   // Speed calculation (bytes per second)
   uploadSpeed: number;
+  // Album creation
+  albumStatus: AlbumStatus | null;
+  isCreatingAlbum: boolean;
 }
 
 class UploadManager {
@@ -63,6 +79,8 @@ class UploadManager {
     uploadedBytes: 0,
     startTime: 0,
     uploadSpeed: 0,
+    albumStatus: null,
+    isCreatingAlbum: false,
   });
 
   // For speed calculation
@@ -146,6 +164,25 @@ class UploadManager {
     // Handle upload stop
     Events.On("uploadStop", () => {
       this.state.isUploading = false;
+    });
+
+    // Handle album creation progress
+    Events.On("albumProgress", (event: { data: AlbumStatus }) => {
+      this.state.albumStatus = event.data;
+      this.state.isCreatingAlbum = true;
+    });
+
+    // Handle album creation complete
+    Events.On("albumComplete", (event: { data: AlbumStatus }) => {
+      this.state.albumStatus = event.data;
+      this.state.isCreatingAlbum = false;
+    });
+
+    // Handle album creation error
+    Events.On("albumError", (event: { data: AlbumError }) => {
+      this.state.isCreatingAlbum = false;
+      // Emit a custom event that App.vue can listen to for showing toast
+      window.dispatchEvent(new CustomEvent('albumError', { detail: event.data }));
     });
   }
 

@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/file"
@@ -24,16 +26,21 @@ type Config struct {
 	UploadThreads                 int      `json:"uploadThreads" koanf:"upload_threads"`
 	DeleteFromHost                bool     `json:"deleteFromHost" koanf:"delete_from_host"`
 	DisableUnsupportedFilesFilter bool     `json:"disableUnsupportedFilesFilter" koanf:"disable_unsupported_files_filter"`
+	AlbumName                     string   `json:"albumName" koanf:"album_name"`
+	AlbumAutoMode                 bool     `json:"albumAutoMode" koanf:"album_auto_mode"`
 }
 
 type ConfigManager struct{}
 
-var AppConfig Config
-var UploadRunning bool = false
-var ConfigPath string
-var DefaultConfig = Config{
-	UploadThreads: 3,
-}
+var (
+	configMu      sync.RWMutex
+	AppConfig     Config
+	UploadRunning bool = false
+	ConfigPath    string
+	DefaultConfig = Config{
+		UploadThreads: 3,
+	}
+)
 
 // ParseAuthString parses an auth string and returns url.Values (exported for CLI use)
 func ParseAuthString(authString string) (url.Values, error) {
@@ -87,6 +94,38 @@ func (g *ConfigManager) SetUploadThreads(uploadThreads int) {
 	}
 	AppConfig.UploadThreads = uploadThreads
 	_ = saveAppConfig()
+}
+
+func (g *ConfigManager) SetAlbumName(albumName string) {
+	configMu.Lock()
+	defer configMu.Unlock()
+	AppConfig.AlbumName = strings.TrimSpace(albumName)
+}
+
+func (g *ConfigManager) GetAlbumName() string {
+	configMu.RLock()
+	defer configMu.RUnlock()
+	return AppConfig.AlbumName
+}
+
+func (g *ConfigManager) SetAlbumAutoMode(autoMode bool) {
+	configMu.Lock()
+	defer configMu.Unlock()
+	AppConfig.AlbumAutoMode = autoMode
+	// Don't persist to disk - this is per-session like AlbumName
+}
+
+func (g *ConfigManager) GetAlbumAutoMode() bool {
+	configMu.RLock()
+	defer configMu.RUnlock()
+	return AppConfig.AlbumAutoMode
+}
+
+// GetAlbumConfig returns album name and auto mode atomically
+func GetAlbumConfig() (albumName string, autoMode bool) {
+	configMu.RLock()
+	defer configMu.RUnlock()
+	return AppConfig.AlbumName, AppConfig.AlbumAutoMode
 }
 
 func (g *ConfigManager) AddCredentials(newAuthString string) error {

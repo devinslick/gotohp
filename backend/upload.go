@@ -12,6 +12,17 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
+// FilesDroppedEvent is emitted when files are dropped on any drop zone
+type FilesDroppedEvent struct {
+	Files    []string `json:"files"`
+	DropZone string   `json:"dropZone"`
+}
+
+// StartUploadEvent is received from frontend to start upload
+type StartUploadEvent struct {
+	Files []string `json:"files"`
+}
+
 func init() {
 	application.RegisterEvent[UploadBatchStart]("uploadStart")
 	application.RegisterEvent[application.Void]("uploadStop")
@@ -19,12 +30,15 @@ func init() {
 	application.RegisterEvent[ThreadStatus]("ThreadStatus")
 	application.RegisterEvent[application.Void]("uploadCancel")
 	application.RegisterEvent[int64]("uploadTotalBytes")
+	application.RegisterEvent[FilesDroppedEvent]("files-dropped")
+	application.RegisterEvent[StartUploadEvent]("startUpload")
 }
 
 // ProgressCallback is a function type for upload progress updates
 type ProgressCallback func(event string, data any)
 
 type UploadManager struct {
+	mu      sync.Mutex
 	wg      sync.WaitGroup
 	cancel  chan struct{}
 	running bool
@@ -38,14 +52,41 @@ func NewUploadManager(app AppInterface) *UploadManager {
 }
 
 func (m *UploadManager) IsRunning() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.running
 }
 
 func (m *UploadManager) Cancel() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.cancel != nil {
 		close(m.cancel)
-		m.cancel = nil
+		// Don't set to nil - readers still need to detect closure via select
 	}
+}
+
+// isCancelled checks if cancellation has been requested
+func (m *UploadManager) isCancelled() bool {
+	m.mu.Lock()
+	cancel := m.cancel
+	m.mu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	select {
+	case <-cancel:
+		return true
+	default:
+		return false
+	}
+}
+
+// getCancelChan returns the cancel channel safely
+func (m *UploadManager) getCancelChan() <-chan struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cancel
 }
 
 type UploadBatchStart struct {
@@ -72,12 +113,14 @@ type ThreadStatus struct {
 }
 
 func (m *UploadManager) Upload(app AppInterface, paths []string) {
+	m.mu.Lock()
 	if m.running {
+		m.mu.Unlock()
 		return
 	}
-
 	m.running = true
 	m.cancel = make(chan struct{})
+	m.mu.Unlock()
 
 	targetPaths, err := filterGooglePhotosFiles(paths)
 	if err != nil {
@@ -139,16 +182,18 @@ func (m *UploadManager) Upload(app AppInterface, paths []string) {
 		close(workChan)
 	}()
 
-	// Handle results and wait for completion
+	// Handle results, wait for completion, and create album if configured
 	go func() {
-		m.wg.Wait()
-		close(results)
-		app.EmitEvent("uploadStop", nil)
-		m.running = false
-	}()
+		// Collect successful uploads with path -> mediaKey mapping for AUTO mode
+		successfulUploads := make(map[string]string) // path -> mediaKey
 
-	// Process results
-	go func() {
+		// Wait for all workers to finish in a separate goroutine, then close results
+		go func() {
+			m.wg.Wait()
+			close(results)
+		}()
+
+		// Process all results (this blocks until results channel is closed)
 		for result := range results {
 			app.EmitEvent("FileStatus", result)
 			if result.IsError {
@@ -157,9 +202,114 @@ func (m *UploadManager) Upload(app AppInterface, paths []string) {
 			} else {
 				s := fmt.Sprintf("upload success: %v", result.Path)
 				app.GetLogger().Info(s)
+				if result.MediaKey != "" {
+					successfulUploads[result.Path] = result.MediaKey
+				}
 			}
 		}
+
+		// Handle album creation after all results are processed
+		// Get album config atomically to avoid race conditions
+		albumName, albumAutoMode := GetAlbumConfig()
+		app.GetLogger().Info(fmt.Sprintf("Upload complete. Successful uploads: %d, AlbumName: '%s', AlbumAutoMode: %v",
+			len(successfulUploads), albumName, albumAutoMode))
+
+		if len(successfulUploads) > 0 {
+			m.handleAlbumCreation(app, successfulUploads, albumName, albumAutoMode)
+		}
+
+		app.EmitEvent("uploadStop", nil)
+		m.mu.Lock()
+		m.running = false
+		m.mu.Unlock()
 	}()
+}
+
+// handleAlbumCreation handles album creation based on config (manual name/key or AUTO mode)
+func (m *UploadManager) handleAlbumCreation(app AppInterface, uploads map[string]string, albumName string, albumAutoMode bool) {
+	// Check if cancelled before starting album creation
+	if m.isCancelled() {
+		app.GetLogger().Info("Upload cancelled, skipping album creation")
+		return
+	}
+
+	app.GetLogger().Info(fmt.Sprintf("handleAlbumCreation called with %d uploads", len(uploads)))
+
+	// Create API once for all album operations
+	api, err := NewApi()
+	if err != nil {
+		app.GetLogger().Error(fmt.Sprintf("failed to create API for album creation: %v", err))
+		app.EmitEvent("albumError", AlbumError{
+			AlbumName: albumName,
+			Error:     fmt.Sprintf("failed to initialize API: %v", err),
+		})
+		return
+	}
+
+	albumManager := NewAlbumManager(api, app, m.getCancelChan())
+
+	// Check if AUTO mode is enabled
+	if albumAutoMode {
+		app.GetLogger().Info("AUTO mode enabled, creating albums from directories")
+		m.createAlbumsFromDirectories(albumManager, app, uploads)
+		return
+	}
+
+	// Manual mode: use AlbumName if set
+	if albumName == "" {
+		app.GetLogger().Info("No album name set and AUTO mode disabled, skipping album creation")
+		return
+	}
+
+	app.GetLogger().Info(fmt.Sprintf("Creating album with name/key: '%s'", albumName))
+
+	mediaKeys := make([]string, 0, len(uploads))
+	for _, mediaKey := range uploads {
+		mediaKeys = append(mediaKeys, mediaKey)
+	}
+
+	app.GetLogger().Info(fmt.Sprintf("Adding %d media keys to album '%s'", len(mediaKeys), albumName))
+
+	albumKeys, err := albumManager.AddToAlbum(mediaKeys, albumName)
+	if err != nil {
+		app.GetLogger().Error(fmt.Sprintf("failed to create album '%s': %v", albumName, err))
+		app.EmitEvent("albumError", AlbumError{
+			AlbumName: albumName,
+			Error:     err.Error(),
+		})
+		return
+	}
+	app.GetLogger().Info(fmt.Sprintf("created album '%s' with %d items, album keys: %v", albumName, len(mediaKeys), albumKeys))
+}
+
+// createAlbumsFromDirectories creates albums based on parent directory names (AUTO mode)
+func (m *UploadManager) createAlbumsFromDirectories(albumManager *AlbumManager, app AppInterface, uploads map[string]string) {
+	// Group media keys by parent directory
+	mediaKeysByDir := make(map[string][]string)
+
+	for filePath, mediaKey := range uploads {
+		parentDir := filepath.Dir(filePath)
+		mediaKeysByDir[parentDir] = append(mediaKeysByDir[parentDir], mediaKey)
+	}
+
+	// Create an album for each directory
+	for dirPath, mediaKeys := range mediaKeysByDir {
+		albumName := filepath.Base(dirPath)
+		if albumName == "" || albumName == "." {
+			albumName = "Uploads"
+		}
+
+		albumKeys, err := albumManager.AddToAlbum(mediaKeys, albumName)
+		if err != nil {
+			app.GetLogger().Error(fmt.Sprintf("failed to create album '%s': %v", albumName, err))
+			app.EmitEvent("albumError", AlbumError{
+				AlbumName: albumName,
+				Error:     err.Error(),
+			})
+			continue
+		}
+		app.GetLogger().Info(fmt.Sprintf("created album '%s' with %d items, album keys: %v", albumName, len(mediaKeys), albumKeys))
+	}
 }
 
 // supportedFormats is a map of file extensions supported by Google Photos (O(1) lookup)
@@ -200,7 +350,9 @@ func scanDirectoryForFiles(path string, recursive bool) ([]string, error) {
 			if recursive {
 				subFiles, err := scanDirectoryForFiles(fullPath, recursive)
 				if err != nil {
-					return nil, err
+					// Log error and continue with other directories instead of failing
+					// This handles permission errors, broken symlinks, etc.
+					continue
 				}
 				files = append(files, subFiles...)
 			}
@@ -378,7 +530,7 @@ func uploadFileWithCallback(ctx context.Context, api *Api, filePath string, work
 
 	mediaKey, err := api.CommitUpload(CommitToken, fileInfo.Name(), sha1_hash_bytes, fileInfo.ModTime().Unix())
 	if err != nil {
-		return "", fmt.Errorf("error commiting file: %w", err)
+		return "", fmt.Errorf("error committing file: %w", err)
 	}
 
 	if len(mediaKey) == 0 {
