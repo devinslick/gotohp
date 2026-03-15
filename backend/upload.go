@@ -419,14 +419,15 @@ func uploadFileWithCallback(ctx context.Context, api *Api, filePath string, work
 	fileName := filepath.Base(filePath)
 	mediakey := ""
 
-	// Capture mtime; optionally override with timestamp parsed from filename.
-	var originalMtime int64
+	// Determine the timestamp to use for the upload.
+	// Default to file mtime, but allow filename-based timestamp to take precedence if enabled.
+	var uploadTimestamp int64
 	if info, err := os.Stat(filePath); err == nil {
-		originalMtime = info.ModTime().Unix()
+		uploadTimestamp = info.ModTime().Unix()
 	}
 	if AppConfig.SetDateFromFilename {
 		if t, ok := extractTimestampFromFilename(filePath); ok {
-			originalMtime = t.Unix()
+			uploadTimestamp = t.Unix()
 		}
 	}
 
@@ -539,7 +540,7 @@ func uploadFileWithCallback(ctx context.Context, api *Api, filePath string, work
 		Message:  "Committing upload...",
 	})
 
-	mediaKey, err := api.CommitUpload(CommitToken, fileInfo.Name(), sha1_hash_bytes, originalMtime)
+	mediaKey, err := api.CommitUpload(CommitToken, fileInfo.Name(), sha1_hash_bytes, uploadTimestamp)
 	if err != nil {
 		return "", fmt.Errorf("error committing file: %w", err)
 	}
