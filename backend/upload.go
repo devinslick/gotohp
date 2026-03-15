@@ -315,8 +315,8 @@ func (m *UploadManager) createAlbumsFromDirectories(albumManager *AlbumManager, 
 // supportedFormats is a map of file extensions supported by Google Photos (O(1) lookup)
 var supportedFormats = map[string]bool{
 	// Photo formats
-	"avif": true, "bmp": true, "gif": true, "heic": true, "ico": true,
-	"jpg": true, "jpeg": true, "png": true, "tiff": true, "webp": true,
+	"avif": true, "bmp": true, "gif": true, "heic": true, "heif": true, "ico": true,
+	"jpg": true, "jpeg": true, "png": true, "tif": true, "tiff": true, "webp": true,
 	"cr2": true, "cr3": true, "nef": true, "arw": true, "orf": true,
 	"raf": true, "rw2": true, "pef": true, "sr2": true, "dng": true,
 	// Video formats
