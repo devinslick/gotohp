@@ -25,9 +25,9 @@ var filenameTimestampPatterns = []filenamePattern{
 	{regexp.MustCompile(`(?:^|[^0-9])(1\d{12})(?:[^0-9]|$)`), true, true},
 }
 
-// extractTimestampFromFilename tries each pattern in priority order.
+// parseTimestampFromFilename tries each pattern in priority order.
 // Returns the extracted time and true on success.
-func extractTimestampFromFilename(filename string) (time.Time, bool) {
+func parseTimestampFromFilename(filename string) (time.Time, bool) {
 	base := filepath.Base(filename)
 
 	for _, pat := range filenameTimestampPatterns {
