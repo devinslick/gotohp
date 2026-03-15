@@ -419,12 +419,6 @@ func uploadFileWithCallback(ctx context.Context, api *Api, filePath string, work
 	fileName := filepath.Base(filePath)
 	mediakey := ""
 
-	// Pre-stage: fix misnamed files (e.g. WebP saved as .jpg)
-	if newPath, renamed := RenameToCorrectExtension(filePath); renamed {
-		filePath = newPath
-		fileName = filepath.Base(filePath)
-	}
-
 	// Capture mtime; optionally override with timestamp parsed from filename.
 	var originalMtime int64
 	if info, err := os.Stat(filePath); err == nil {
