@@ -28,6 +28,7 @@ type Config struct {
 	DisableUnsupportedFilesFilter bool     `json:"disableUnsupportedFilesFilter" koanf:"disable_unsupported_files_filter"`
 	AlbumName                     string   `json:"albumName" koanf:"album_name"`
 	AlbumAutoMode                 bool     `json:"albumAutoMode" koanf:"album_auto_mode"`
+	FilenameTimestamp             bool     `json:"filenameTimestamp" koanf:"filename_timestamp"`
 }
 
 type ConfigManager struct{}
@@ -126,6 +127,11 @@ func GetAlbumConfig() (albumName string, autoMode bool) {
 	configMu.RLock()
 	defer configMu.RUnlock()
 	return AppConfig.AlbumName, AppConfig.AlbumAutoMode
+}
+
+func (g *ConfigManager) SetFilenameTimestamp(v bool) {
+	AppConfig.FilenameTimestamp = v
+	_ = saveAppConfig()
 }
 
 func (g *ConfigManager) AddCredentials(newAuthString string) error {

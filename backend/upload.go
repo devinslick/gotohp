@@ -419,6 +419,23 @@ func uploadFileWithCallback(ctx context.Context, api *Api, filePath string, work
 	fileName := filepath.Base(filePath)
 	mediakey := ""
 
+	// Pre-stage: fix misnamed files (e.g. WebP saved as .jpg)
+	if newPath, renamed := RenameToCorrectExtension(filePath); renamed {
+		filePath = newPath
+		fileName = filepath.Base(filePath)
+	}
+
+	// Capture mtime; optionally override with timestamp parsed from filename.
+	var originalMtime int64
+	if info, err := os.Stat(filePath); err == nil {
+		originalMtime = info.ModTime().Unix()
+	}
+	if AppConfig.FilenameTimestamp {
+		if t, ok := extractTimestampFromFilename(filePath); ok {
+			originalMtime = t.Unix()
+		}
+	}
+
 	// Stage 1: Hashing
 	callback("ThreadStatus", ThreadStatus{
 		WorkerID: workerID,
@@ -528,7 +545,7 @@ func uploadFileWithCallback(ctx context.Context, api *Api, filePath string, work
 		Message:  "Committing upload...",
 	})
 
-	mediaKey, err := api.CommitUpload(CommitToken, fileInfo.Name(), sha1_hash_bytes, fileInfo.ModTime().Unix())
+	mediaKey, err := api.CommitUpload(CommitToken, fileInfo.Name(), sha1_hash_bytes, originalMtime)
 	if err != nil {
 		return "", fmt.Errorf("error committing file: %w", err)
 	}

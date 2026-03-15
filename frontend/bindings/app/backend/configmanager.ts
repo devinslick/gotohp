@@ -47,6 +47,10 @@ export function SetDisableUnsupportedFilesFilter(disableUnsupportedFilesFilter: 
     return $Call.ByID(821557574, disableUnsupportedFilesFilter);
 }
 
+export function SetFilenameTimestamp(v: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1156506585, v);
+}
+
 export function SetForceUpload(forceUpload: boolean): $CancellablePromise<void> {
     return $Call.ByID(2189240988, forceUpload);
 }
