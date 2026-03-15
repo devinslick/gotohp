@@ -21,7 +21,7 @@ interface Settings {
     forceUpload: boolean
     deleteFromHost: boolean
     disableUnsupportedFilesFilter: boolean
-    filenameTimestamp: boolean
+    setDateFromFilename: boolean
     uploadThreads: number
 }
 
@@ -33,7 +33,7 @@ const settings = ref<Settings>({
     forceUpload: false,
     deleteFromHost: false,
     disableUnsupportedFilesFilter: false,
-    filenameTimestamp: false,
+    setDateFromFilename: false,
     uploadThreads: 0
 })
 
@@ -47,7 +47,7 @@ onMounted(async () => {
         forceUpload: config.forceUpload || false,
         deleteFromHost: config.deleteFromHost || false,
         disableUnsupportedFilesFilter: config.disableUnsupportedFilesFilter || false,
-        filenameTimestamp: config.filenameTimestamp || false,
+        setDateFromFilename: config.setDateFromFilename || false,
         uploadThreads: config.uploadThreads || 1
     }
 })
@@ -82,8 +82,8 @@ watch(() => settings.value.disableUnsupportedFilesFilter, async (newValue) => {
     await ConfigManager.SetDisableUnsupportedFilesFilter(newValue)
 })
 
-watch(() => settings.value.filenameTimestamp, async (newValue) => {
-    await ConfigManager.SetFilenameTimestamp(newValue)
+watch(() => settings.value.setDateFromFilename, async (newValue) => {
+    await ConfigManager.SetSetDateFromFilename(newValue)
 })
 
 watch(() => settings.value.uploadThreads, async (newValue) => {
@@ -166,12 +166,12 @@ watch(() => settings.value.uploadThreads, async (newValue) => {
     </div>
     <div class="flex items-center justify-between">
       <Label
-        for="filename-timestamp"
+        for="set-date-from-filename"
         class="size-full cursor-pointer"
       >Set Upload Date from Filename</Label>
       <Switch
-        id="filename-timestamp"
-        v-model="settings.filenameTimestamp"
+        id="set-date-from-filename"
+        v-model="settings.setDateFromFilename"
       />
     </div>
     <div class="flex items-center justify-between">

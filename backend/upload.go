@@ -424,7 +424,7 @@ func uploadFileWithCallback(ctx context.Context, api *Api, filePath string, work
 	if info, err := os.Stat(filePath); err == nil {
 		originalMtime = info.ModTime().Unix()
 	}
-	if AppConfig.FilenameTimestamp {
+	if AppConfig.SetDateFromFilename {
 		if t, ok := extractTimestampFromFilename(filePath); ok {
 			originalMtime = t.Unix()
 		}

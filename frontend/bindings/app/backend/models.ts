@@ -90,7 +90,7 @@ export class Config {
     "disableUnsupportedFilesFilter": boolean;
     "albumName": string;
     "albumAutoMode": boolean;
-    "filenameTimestamp": boolean;
+    "setDateFromFilename": boolean;
 
     /** Creates a new Config instance. */
     constructor($$source: Partial<Config> = {}) {
@@ -130,8 +130,8 @@ export class Config {
         if (!("albumAutoMode" in $$source)) {
             this["albumAutoMode"] = false;
         }
-        if (!("filenameTimestamp" in $$source)) {
-            this["filenameTimestamp"] = false;
+        if (!("setDateFromFilename" in $$source)) {
+            this["setDateFromFilename"] = false;
         }
 
         Object.assign(this, $$source);

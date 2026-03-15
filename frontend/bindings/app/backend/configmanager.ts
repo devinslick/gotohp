@@ -47,10 +47,6 @@ export function SetDisableUnsupportedFilesFilter(disableUnsupportedFilesFilter: 
     return $Call.ByID(821557574, disableUnsupportedFilesFilter);
 }
 
-export function SetFilenameTimestamp(v: boolean): $CancellablePromise<void> {
-    return $Call.ByID(1156506585, v);
-}
-
 export function SetForceUpload(forceUpload: boolean): $CancellablePromise<void> {
     return $Call.ByID(2189240988, forceUpload);
 }
@@ -69,6 +65,10 @@ export function SetSaver(saver: boolean): $CancellablePromise<void> {
 
 export function SetSelected(email: string): $CancellablePromise<void> {
     return $Call.ByID(2816040807, email);
+}
+
+export function SetSetDateFromFilename(v: boolean): $CancellablePromise<void> {
+    return $Call.ByID(1731635347, v);
 }
 
 export function SetUploadThreads(uploadThreads: number): $CancellablePromise<void> {
